@@ -38,7 +38,7 @@ public class User {
         createdAt = LocalDateTime.now();
     }
 
-    private static User create(String email, String password, String name) {
+    public static User create(String email, String password, String name) {
         User user = new User();
         user.email = email;
         user.password = password;
