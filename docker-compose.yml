@@ -15,7 +15,7 @@ services:
     image: redis:7.0
     container_name: shopflow-redis
     ports:
-      - "6379:6379"
+      - "6380:6379"
 
 volumes:
   mysql-user-data:

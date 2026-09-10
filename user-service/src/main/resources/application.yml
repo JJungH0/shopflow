@@ -19,7 +19,7 @@ spring:
   data:
     redis:
       host: localhost
-      port: 6379
+      port: 6380
 
 jwt:
   secret: shopflow-secret-key-must-be-256-bit-length-at-least-here
