@@ -1,0 +1,27 @@
+server:
+  port: 8081
+
+spring:
+  application:
+    name: user-service
+  datasource:
+    url: jdbc:mysql://localhost:3307/shopflow_user?serverTimezone=Asia/Seoul
+    username: root
+    password: password
+    driver-class-name: com.mysql.cj.jdbc.Driver
+  jpa:
+    hibernate:
+      ddl-auto: update
+    show-sql: true
+    properties:
+      hibernate:
+        format_sql: true
+  data:
+    redis:
+      host: localhost
+      port: 6379
+
+jwt:
+  secret: shopflow-secret-key-must-be-256-bit-length-at-least-here
+  access-expiration: 1800000
+  refresh-expiration: 604800000
