@@ -1,0 +1,10 @@
+.gradle/
+build/
+*/build/
+.idea/
+*.iml
+*/src/main/resources/application-local.yml
+frontend/node_modules/
+frontend/.next/
+.env
+.env.local
