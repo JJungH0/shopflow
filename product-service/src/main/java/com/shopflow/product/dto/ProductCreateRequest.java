@@ -11,5 +11,5 @@ public record ProductCreateRequest(
         String description,
         @NotNull @Positive Integer price,
         @NotNull @PositiveOrZero Integer stockQuantity,
-        @NotBlank Category category) {
+        @NotNull Category category) {
 }

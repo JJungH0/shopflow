@@ -16,7 +16,10 @@ public enum ErrorCode {
     EXPIRED_TOKEN(HttpStatus.UNAUTHORIZED, "만료된 토큰입니다."),
 
     INVALID_INPUT(HttpStatus.BAD_REQUEST, "잘못된 입력값입니다."),
-    INTERNAL_SERVER_ERROR(HttpStatus.INTERNAL_SERVER_ERROR, "서버 내부 오류입니다.");
+    INTERNAL_SERVER_ERROR(HttpStatus.INTERNAL_SERVER_ERROR, "서버 내부 오류입니다."),
+
+    PRODUCT_NOT_FOUND(HttpStatus.NOT_FOUND, "존재하지 않는 상풉입니다."),
+    OUT_OF_STOCK(HttpStatus.CONFLICT, "재고가 부족합니다.");
 
     private final HttpStatus status;
     private final String message;
