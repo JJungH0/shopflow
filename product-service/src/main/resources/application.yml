@@ -5,7 +5,7 @@ spring:
   application:
     name: product-service
   datasource:
-    url: jdbc:mysql://localhost:3307/shopflow_user?serverTimezone=Asia/Seoul
+    url: jdbc:mysql://localhost:3308/shopflow_product?serverTimezone=Asia/Seoul
     username: root
     password: password
     driver-class-name: com.mysql.cj.jdbc.Driver
