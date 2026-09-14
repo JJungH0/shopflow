@@ -6,8 +6,11 @@ import com.shopflow.product.domain.Product;
 import com.shopflow.product.domain.enums.Category;
 import com.shopflow.product.dto.ProductCreateRequest;
 import com.shopflow.product.dto.ProductResponse;
-import com.shopflow.product.repository.ProductServiceRepository;
+import com.shopflow.product.repository.ProductRepository;
 import lombok.RequiredArgsConstructor;
+import org.springframework.orm.ObjectOptimisticLockingFailureException;
+import org.springframework.retry.annotation.Backoff;
+import org.springframework.retry.annotation.Retryable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -18,7 +21,7 @@ import java.util.List;
 @Transactional(readOnly = true)
 public class ProductService {
 
-    private final ProductServiceRepository productRepository;
+    private final ProductRepository productRepository;
 
     @Transactional
     public Long createProduct(ProductCreateRequest req) {
@@ -50,6 +53,35 @@ public class ProductService {
 
     @Transactional
     public void decreaseStock(Long productId, int quantity){
+        Product product = productRepository.findById(productId)
+                .orElseThrow(() -> new BusinessException(ErrorCode.PRODUCT_NOT_FOUND));
+
+        product.decreaseStock(quantity);
+    }
+
+    @Retryable(
+            retryFor = ObjectOptimisticLockingFailureException.class,
+            maxAttempts = 100,
+            backoff = @Backoff(delay = 50)
+    )
+    @Transactional
+    public void decreaseStockWithRetry(Long productId, int quantity) {
+        Product product = productRepository.findById(productId)
+                .orElseThrow(() -> new BusinessException(ErrorCode.PRODUCT_NOT_FOUND));
+
+        product.decreaseStock(quantity);
+    }
+
+    @Transactional
+    public void decreaseStockWithPessimisticLock(Long productId, int quantity) {
+        Product product = productRepository.findByIdWithPessimisticLock(productId)
+                .orElseThrow(() -> new BusinessException(ErrorCode.PRODUCT_NOT_FOUND));
+
+        product.decreaseStock(quantity);
+    }
+
+    @Transactional
+    public void decreaseStockWithRedisLock(Long productId, int quantity) {
         Product product = productRepository.findById(productId)
                 .orElseThrow(() -> new BusinessException(ErrorCode.PRODUCT_NOT_FOUND));
 

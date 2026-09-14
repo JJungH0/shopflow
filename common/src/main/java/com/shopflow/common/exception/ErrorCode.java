@@ -19,8 +19,9 @@ public enum ErrorCode {
     INTERNAL_SERVER_ERROR(HttpStatus.INTERNAL_SERVER_ERROR, "서버 내부 오류입니다."),
 
     PRODUCT_NOT_FOUND(HttpStatus.NOT_FOUND, "존재하지 않는 상풉입니다."),
-    OUT_OF_STOCK(HttpStatus.CONFLICT, "재고가 부족합니다.");
+    OUT_OF_STOCK(HttpStatus.CONFLICT, "재고가 부족합니다."),
 
+    LOCK_ACQUISITION_FAILED(HttpStatus.CONFLICT, "요청이 많아 처리하지 못하였습니다. 잠시 후 다시 시도해주세요.");
     private final HttpStatus status;
     private final String message;
 }
