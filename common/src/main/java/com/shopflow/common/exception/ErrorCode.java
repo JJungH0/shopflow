@@ -21,7 +21,12 @@ public enum ErrorCode {
     PRODUCT_NOT_FOUND(HttpStatus.NOT_FOUND, "존재하지 않는 상풉입니다."),
     OUT_OF_STOCK(HttpStatus.CONFLICT, "재고가 부족합니다."),
 
-    LOCK_ACQUISITION_FAILED(HttpStatus.CONFLICT, "요청이 많아 처리하지 못하였습니다. 잠시 후 다시 시도해주세요.");
+    LOCK_ACQUISITION_FAILED(HttpStatus.CONFLICT, "요청이 많아 처리하지 못하였습니다. 잠시 후 다시 시도해주세요."),
+
+    ORDER_NOT_FOUND(HttpStatus.NOT_FOUND, "존재하지 않는 주문입니다."),
+    INVALID_ORDER_STATUS(HttpStatus.CONFLICT, "처리할 수 없는 주문 상태입니다."),
+
+    PRODUCT_SERVICE_UNAVAILABLE(HttpStatus.SERVICE_UNAVAILABLE, "상품 서비스에 일시적으로 연결할 수 없습니다.");
     private final HttpStatus status;
     private final String message;
 }
