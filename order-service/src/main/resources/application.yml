@@ -4,3 +4,15 @@ server:
 spring:
   application:
     name: order-service
+  datasource:
+    url: jdbc:mysql://localhost:3309/shopflow_order?serverTimezone=Asia/Seoul
+    username: root
+    password: password
+    driver-class-name: com.mysql.cj.jdbc.Driver
+  jpa:
+    hibernate:
+      ddl-auto: update
+    show-sql: true
+    properties:
+      hibernate:
+        format_sql: true

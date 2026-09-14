@@ -22,6 +22,17 @@ services:
     volumes:
       - mysql-product-data:/var/lib/mysql
 
+  mysql-order:
+    image: mysql:8.0
+    container_name: shopflow-mysql-order
+    environment:
+      MYSQL_ROOT_PASSWORD: password
+      MYSQL_DATABASE: shopflow_order
+    ports:
+      - "3309:3306"
+    volumes:
+      - mysql-order-data:/var/lib/mysql
+
   redis:
     image: redis:7.0
     container_name: shopflow-redis
@@ -31,3 +42,4 @@ services:
 volumes:
   mysql-user-data:
   mysql-product-data:
+  mysql-order-data:
