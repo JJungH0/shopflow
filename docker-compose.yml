@@ -5,7 +5,7 @@ services:
     environment:
       MYSQL_ROOT_PASSWORD: password
       MYSQL_DATABASE: shopflow_user
-    command: --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci
+    command: --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci --skip-character-set-client-handshake
     ports:
       - "3307:3306"
     volumes:
@@ -17,7 +17,7 @@ services:
     environment:
       MYSQL_ROOT_PASSWORD: password
       MYSQL_DATABASE: shopflow_product
-    command: --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci
+    command: --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci --skip-character-set-client-handshake
     ports:
       - "3308:3306"
     volumes:
@@ -29,7 +29,7 @@ services:
     environment:
       MYSQL_ROOT_PASSWORD: password
       MYSQL_DATABASE: shopflow_order
-    command: --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci
+    command: --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci --skip-character-set-client-handshake
     ports:
       - "3309:3306"
     volumes:

@@ -1,4 +1,4 @@
-package com.shopflow.order.clinet;
+package com.shopflow.order.client;
 
 import com.shopflow.common.exception.BusinessException;
 import com.shopflow.common.exception.ErrorCode;
