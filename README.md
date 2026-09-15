@@ -139,8 +139,6 @@ docker-compose up -d
 | redis | 6380 | 토큰 저장, 분산 락, 캐시 |
 | kafka | 9092 | 이벤트 브로커 |
 
-> 로컬 MySQL(3306), Redis(6379)와의 포트 충돌을 피하기 위해 다른 포트를 사용합니다.
-
 ### 애플리케이션 기동
 
 ```bash
@@ -414,10 +412,10 @@ xychart-beta
 
 <br/>
 
-![비관적 락](./docs/images/test-result-pessimistic.png)
-![Redisson](./docs/images/test-result-redisson.png)
-![낙관적 락 재시도](./docs/images/test-result-optimistic.png)
-![스핀 락](./docs/images/test-result-spinlock.png)
+![비관적 락](./docs/images/pessimistic.png)
+![Redisson](./docs/images/redisson.png)
+![낙관적 락 재시도](./docs/images/optimistic.png)
+![스핀 락](./docs/images/spinlock.png)
 
 </details>
 
@@ -478,7 +476,7 @@ Order Service가 이미 커밋한 주문을, Product Service의 실패를 이유
 역방향: 주문 취소 (CANCELLED)
 ```
 
-중앙 조정자 없이 각 서비스가 이벤트를 주고받는 **Choreography 방식**을 채택했습니다. 서비스가 3개뿐이라 별도 오케스트레이터의 복잡도를 감수할 이유가 없었습니다.
+중앙에서 전체 서비스를 관리하는 별도의 조정자 없이, 각 서비스가 이벤트를 통해 서로 필요한 정보를 주고받는 Choreography 방식을 사용했습니다. 서비스가 3개로 많지 않아, 별도의 오케스트레이터를 추가하는 것보다 각 서비스가 직접 통신하도록 구성하는 것이 더 단순하고 효율적이라고 판단했습니다.
 
 ### 이벤트 흐름
 
@@ -506,7 +504,7 @@ Order Service                  Kafka                Product Service
      │ 주문 상태 → CANCELLED      │                         │
 ```
 
-**실패를 예외가 아닌 이벤트로 발행**한 점이 핵심입니다.
+**실패를 예외가 아닌 이벤트로 발행하였습니다.**
 
 ```java
 @KafkaListener(topics = KafkaTopic.ORDER_CREATED, groupId = "product-service")
@@ -539,11 +537,11 @@ Kafka는 키를 해싱해 파티션을 결정합니다. 동일 주문의 이벤�
 
 주문 레코드를 삭제하지 않고 `CANCELLED` 상태로 남깁니다. 사용자가 주문 실패 사유를 확인할 수 있고, 재고 부족으로 인한 이탈률 분석도 가능합니다.
 
-### 감수한 것
+### 설계상 고려사항
 
-이 구조는 **최종적 일관성(Eventual Consistency)** 을 전제합니다. 주문 저장과 재고 차감 사이에 시간 간격이 존재하므로, 그 순간 조회하면 "주문은 있으나 재고는 차감되지 않은" 상태가 보입니다.
+주문 처리와 재고 차감이 바로 동시에 이루어지는 것은 아니기 때문에, 잠시 동안 주문은 완료됐지만 재고가 아직 차감되지 않은 상태가 발생할 수 있습니다.
 
-즉시 일관성을 포기한 대가로 얻은 것은 응답 속도와 장애 내성입니다. Product Service가 일시적으로 다운되어도 주문은 접수되고, 이벤트는 Kafka에 보존되었다가 복구 후 처리됩니다.
+대신 각 서비스를 독립적으로 처리하도록 구성해 빠른 응답과 장애 대응이 가능하도록 했습니다. Product Service에 문제가 생기더라도 주문은 정상적으로 접수되고, 이벤트는 Kafka에 저장되어 서비스가 복구된 후 재고 차감이 처리됩니다.
 
 <br/>
 
@@ -663,25 +661,3 @@ sudo sysctl -w net.inet.ip.portrange.first=16384   # 포트 범위 3배 확장
 <br/>
 
 ---
-
-<br/>
-
-## 앞으로 개선할 점
-
-현재 구조에서 인지하고 있는 한계와 개선 방향입니다.
-
-**Dual Write 문제**
-
-주문 저장과 이벤트 발행이 서로 다른 시스템에 대한 쓰기 작업이므로 원자성이 보장되지 않습니다. 이벤트 발행 후 트랜잭션이 롤백되면 "주문은 없는데 재고만 차감된" 상태가 발생할 수 있습니다. `@TransactionalEventListener(phase = AFTER_COMMIT)` 또는 Outbox 패턴으로 해결할 수 있습니다.
-
-**Consumer 멱등성**
-
-Kafka는 at-least-once 전달을 보장하므로 동일 이벤트가 중복 전달될 수 있습니다. 현재는 중복 처리 방지 로직이 없어 재고가 두 번 차감될 여지가 있습니다. 처리 완료된 이벤트 ID를 기록하는 방식으로 보완이 필요합니다.
-
-**서비스 직접 접근 차단**
-
-각 서비스가 Gateway의 `X-User-Id` 헤더를 신뢰하는 구조이므로, Gateway를 우회해 서비스 포트로 직접 요청하면 헤더 위조가 가능합니다. 실제 배포 시에는 서비스 포트를 외부에 노출하지 않는 네트워크 격리가 전제되어야 합니다.
-
-**Circuit Breaker**
-
-Order Service가 Product Service를 동기 호출하는 구간에 장애 전파 차단 장치가 없습니다. Product Service 응답 지연이 Order Service 스레드 고갈로 이어질 수 있어 Resilience4j 적용을 검토 중입니다.
