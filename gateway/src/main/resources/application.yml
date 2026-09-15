@@ -4,3 +4,29 @@ server:
 spring:
   application:
     name: gateway
+  cloud:
+    gateway:
+      server:
+        webflux:
+          routes:
+            - id: user-service
+              uri: http://localhost:8081
+              predicates:
+                - Path=/api/users/**
+
+            - id: product-service
+              uri: http://localhost:8082
+              predicates:
+                - Path=/api/products/**
+
+            - id: order-service
+              uri: http://localhost:8083
+              predicates:
+                - Path=/api/orders/**
+
+jwt:
+  secret: shopflow-secret-key-must-be-256-bit-length-at-least-here
+
+logging:
+  level:
+    org.springframework.cloud.gateway: debug
