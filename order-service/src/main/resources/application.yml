@@ -29,5 +29,5 @@ spring:
       properties:
         spring.json.trusted.packages: "com.shopflow.*"
 
-  product-service:
-    url: http://localhost:8082
+product-service:
+  url: http://localhost:8082

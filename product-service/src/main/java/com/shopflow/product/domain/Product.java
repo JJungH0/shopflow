@@ -1,5 +1,7 @@
 package com.shopflow.product.domain;
 
+import com.shopflow.common.exception.BusinessException;
+import com.shopflow.common.exception.ErrorCode;
 import com.shopflow.product.domain.enums.Category;
 import com.shopflow.product.domain.enums.Status;
 import jakarta.persistence.*;
@@ -71,7 +73,7 @@ public class Product {
     
     public void decreaseStock(int quantity) {
         if (this.stockQuantity < quantity) {
-            throw new IllegalArgumentException("재고가 부족합니다.");
+            throw new BusinessException(ErrorCode.OUT_OF_STOCK);
         }
         this.stockQuantity -= quantity;
         if (this.stockQuantity == 0) {

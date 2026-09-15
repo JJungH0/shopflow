@@ -3,7 +3,7 @@ package com.shopflow.order.service;
 import com.shopflow.common.event.OrderCreatedEvent;
 import com.shopflow.common.exception.BusinessException;
 import com.shopflow.common.exception.ErrorCode;
-import com.shopflow.order.clinet.ProductClient;
+import com.shopflow.order.client.ProductClient;
 import com.shopflow.order.domain.Order;
 import com.shopflow.order.domain.OrderItem;
 import com.shopflow.order.dto.OrderCreateRequest;
