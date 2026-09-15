@@ -2,12 +2,14 @@ package com.shopflow.product.config;
 
 import com.shopflow.common.exception.BusinessException;
 import com.shopflow.common.response.ApiResponse;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.ResponseEntity;
 import org.springframework.validation.FieldError;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 
+@Slf4j
 @RestControllerAdvice
 public class GlobalExceptionHandler {
 
@@ -33,6 +35,7 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(Exception.class)
     public ResponseEntity<ApiResponse<Void>> handleException(Exception e) {
+        log.error("처리되지 않은 예외 발생", e);
         return ResponseEntity.internalServerError()
                 .body(ApiResponse.fail("서버 내부 오류입니다."));
     }

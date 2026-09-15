@@ -2,12 +2,16 @@ package com.shopflow.product.service;
 
 import com.shopflow.common.exception.BusinessException;
 import com.shopflow.common.exception.ErrorCode;
+import com.shopflow.product.config.CacheConfig;
 import com.shopflow.product.domain.Product;
 import com.shopflow.product.domain.enums.Category;
 import com.shopflow.product.dto.ProductCreateRequest;
 import com.shopflow.product.dto.ProductResponse;
 import com.shopflow.product.repository.ProductRepository;
 import lombok.RequiredArgsConstructor;
+import org.springframework.cache.annotation.CacheEvict;
+import org.springframework.cache.annotation.Cacheable;
+import org.springframework.cache.annotation.Caching;
 import org.springframework.orm.ObjectOptimisticLockingFailureException;
 import org.springframework.retry.annotation.Backoff;
 import org.springframework.retry.annotation.Retryable;
@@ -23,6 +27,7 @@ public class ProductService {
 
     private final ProductRepository productRepository;
 
+    @CacheEvict(value = CacheConfig.PRODUCT_LIST_CACHE, allEntries = true)
     @Transactional
     public Long createProduct(ProductCreateRequest req) {
         Product product = Product.create(
@@ -37,6 +42,7 @@ public class ProductService {
         return saved.getId();
     }
 
+    @Cacheable(value = CacheConfig.PRODUCT_CACHE, key = "#id")
     public ProductResponse getProduct(Long id) {
         Product product = productRepository.findById(id)
                 .orElseThrow(() -> new BusinessException(ErrorCode.PRODUCT_NOT_FOUND));
@@ -44,6 +50,7 @@ public class ProductService {
         return ProductResponse.from(product);
     }
 
+    @Cacheable(value = CacheConfig.PRODUCT_LIST_CACHE, key = "#category")
     public List<ProductResponse> getProductsByCategory(Category category) {
         return productRepository.findByCategory(category)
                 .stream()
@@ -80,6 +87,10 @@ public class ProductService {
         product.decreaseStock(quantity);
     }
 
+    @Caching(evict = {
+            @CacheEvict(value = CacheConfig.PRODUCT_CACHE, key = "#productId"),
+            @CacheEvict(value = CacheConfig.PRODUCT_LIST_CACHE, allEntries = true)
+    })
     @Transactional
     public void decreaseStockWithRedisLock(Long productId, int quantity) {
         Product product = productRepository.findById(productId)
