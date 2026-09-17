@@ -12,6 +12,7 @@
 | 분산 환경에서 트랜잭션을 묶을 수 없음 | Kafka 기반 Saga 패턴 + 보상 트랜잭션 | 재고 부족 시 주문 자동 취소 |
 | 목록 조회 응답이 느림 | Redis 캐싱 적용 후 부하 테스트 검증 | 평균 응답 **52.9ms → 27.7ms (48% 단축)** |
 | 인증 로직이 서비스마다 중복 | API Gateway에서 JWT 검증 일원화 | 미인증 요청이 서비스에 도달하지 않음 |
+| 이벤트 발행과 DB 쓰기의 원자성 부재 | Outbox 패턴으로 이벤트를 DB에 선저장 | Kafka 장애 중 접수된 주문도 **복구 시 자동 발행** |
 
 각 항목의 측정 과정과 판단 근거는 [트러블슈팅](#트러블슈팅)에 정리했습니다.
 
@@ -27,6 +28,7 @@
     - [1. 동시 주문 시 재고 정합성 문제](#1-동시-주문-시-재고-정합성-문제)
     - [2. 분산 트랜잭션 — Saga 패턴](#2-분산-트랜잭션--saga-패턴)
     - [3. 캐싱은 언제 효과적인가](#3-캐싱은-언제-효과적인가)
+    - [4. 이벤트 발행의 원자성 — Dual Write 문제](#4-이벤트-발행의-원자성--dual-write-문제)
 
 <br/>
 
@@ -660,3 +662,258 @@ sudo sysctl -w net.inet.ip.portrange.first=16384   # 포트 범위 3배 확장
 <br/>
 
 ---
+
+<br/>
+
+## 4. 이벤트 발행의 원자성 — Dual Write 문제
+
+### 문제 상황
+
+Saga 패턴을 적용한 뒤에도 주문 생성 로직에는 구조적 결함이 남아 있었습니다.
+
+```java
+@Transactional
+public OrderResponse createOrder(Long userId, OrderCreateRequest request) {
+    Order saved = orderRepository.save(order);                  // ① MySQL 쓰기
+    orderEventProducer.publishOrderCreated(toEvent(saved));     // ② Kafka 쓰기
+    return OrderResponse.from(saved);
+}   // ③ 트랜잭션 커밋
+```
+
+**서로 다른 두 시스템에 쓰기를 수행**하고 있으나, 이 둘을 하나의 트랜잭션으로 묶을 수단이 없습니다. 이를 Dual Write 문제라고 합니다.
+
+시간 순서로 보면 다음과 같은 위험이 존재했습니다.
+
+```
+① save()  → INSERT 준비 (아직 커밋 전, 다른 트랜잭션에서 조회 불가)
+② 이벤트 발행 → Kafka로 즉시 전송, Product Service가 재고 차감 시작
+③ 커밋
+```
+
+**발생 가능한 두 가지 장애 시나리오**
+
+| 시나리오 | 결과 |
+|---|---|
+| ③ 직전 예외 발생 → 롤백 | 주문은 존재하지 않는데 재고만 차감됨 |
+| 재고 차감이 ③보다 먼저 완료 | `stock.decreased` 수신 시점에 주문이 미커밋 상태여서 조회 실패 |
+
+두 번째는 로컬 환경에서 거의 재현되지 않다가 부하 상황에서 간헐적으로 발생하는 유형이라 더 위험했습니다.
+
+<br/>
+
+### 1차 해결 — `@TransactionalEventListener`
+
+이벤트 발행 시점을 **트랜잭션 커밋 이후로 미루는** 방식으로 접근했습니다.
+
+Spring 내부 이벤트를 중간 단계로 두고, 커밋 완료 후에만 Kafka로 발행되도록 구성했습니다.
+
+```java
+// OrderService — Kafka로 직접 발행하지 않고 내부 이벤트만 등록
+@Transactional
+public OrderResponse createOrder(Long userId, OrderCreateRequest request) {
+    Order saved = orderRepository.save(order);
+    eventPublisher.publishEvent(new OrderCreatedInternalEvent(toEvent(saved)));
+    return OrderResponse.from(saved);
+}
+```
+
+```java
+// 커밋 완료 후에만 실행
+@TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
+public void handleOrderCreated(OrderCreatedInternalEvent event) {
+    orderEventProducer.publishOrderCreated(event.payload());
+}
+```
+
+`AFTER_COMMIT`을 지정하면 트랜잭션이 롤백될 경우 리스너가 **아예 실행되지 않습니다.** 이로써 두 시나리오가 모두 해소되었습니다.
+
+- 롤백 시 → 이벤트 미발행 → 재고 차감도 발생하지 않음
+- 커밋 완료 후 발행 → `stock.decreased` 수신 시 주문 조회 성공
+
+<br/>
+
+### 1차 해결의 한계
+
+순서 문제는 해결했지만, **발행 실패에 대한 대응 수단이 없었습니다.**
+
+```java
+@TransactionalEventListener(phase = AFTER_COMMIT)
+public void handleOrderCreated(OrderCreatedInternalEvent event) {
+    orderEventProducer.publishOrderCreated(event.payload());
+    //  ↑ 이 시점에 Kafka가 다운되어 있다면?
+}
+```
+
+```
+주문 저장 커밋 성공 (DB에 PENDING 상태로 존재)
+Kafka 발행 실패 (브로커 다운)
+→ 에러 로그만 남고 종료
+→ Kafka가 복구되어도 재발행 수단 없음
+→ 해당 주문은 영구히 PENDING 상태
+```
+
+커밋과 발행 사이의 원자성은 여전히 보장되지 않았습니다.
+
+<br/>
+
+### 2차 해결 — Outbox 패턴
+
+**"같은 DB 안이라면 트랜잭션으로 묶을 수 있다"** 는 점을 활용했습니다.
+
+이벤트를 Kafka로 직접 보내는 대신, **주문과 동일한 DB의 outbox 테이블에 먼저 저장**하고 별도 프로세스가 이를 읽어 발행하도록 분리했습니다.
+
+```
+[기존]
+주문 저장 (MySQL) ─── (트랜잭션 안)
+이벤트 발행 (Kafka) ─── (트랜잭션 밖) 
+
+[Outbox]
+주문 저장 (MySQL)         ─┐
+이벤트 저장 (MySQL outbox) ─┴─ (동일 트랜잭션)
+                               │
+                         (스케줄러가 별도 처리)
+                               ▼
+                       outbox 조회 → Kafka 발행
+```
+
+**이벤트 저장 — 주문과 같은 트랜잭션 내에서**
+
+```java
+@Transactional
+public OrderResponse createOrder(Long userId, OrderCreateRequest request) {
+    Order saved = orderRepository.save(order);
+    saveOutboxEvent(saved);          // 같은 트랜잭션
+    return OrderResponse.from(saved);
+}   // ← 둘 다 커밋되거나 둘 다 롤백
+```
+
+**발행 — 독립된 스케줄러**
+
+```java
+@Scheduled(fixedDelay = 1000)
+@Transactional
+public void publishPendingEvents() {
+    List<OutboxEvent> pendingEvents = outboxEventRepository
+            .findByStatusOrderByIdAsc(OutboxEvent.Status.PENDING, Limit.of(BATCH_SIZE));
+
+    for (OutboxEvent event : pendingEvents) {
+        try {
+            kafkaTemplate.send(
+                    event.getEventType(),
+                    event.getAggregateId(),
+                    event.getPayload()
+            ).get();                    // 발행 완료까지 대기
+            event.markAsPublished();
+        } catch (Exception e) {
+            event.markAsFailed();       // retryCount 증가, 다음 주기에 재시도
+        }
+    }
+}
+```
+
+<details>
+<summary>구현 시 고려한 점</summary>
+
+<br/>
+
+**`.get()`으로 동기 대기** — `send()`는 비동기이므로 결과를 확인하지 않으면 발행 실패한 이벤트를 `PUBLISHED`로 잘못 표시하게 됩니다. 재시도 기회를 잃지 않기 위해 완료를 대기한 뒤 상태를 전이시켰습니다.
+
+**`fixedDelay` 사용** — `fixedRate`는 이전 실행 완료 여부와 무관하게 주기적으로 실행되므로, 발행이 지연되면 여러 스케줄러가 동시에 같은 이벤트를 조회해 중복 발행할 수 있습니다. 이전 실행 종료를 기준으로 하는 `fixedDelay`를 선택했습니다.
+
+**배치 크기 제한** — PENDING 이벤트가 대량 누적된 상황에서 전체를 조회하면 메모리 부담이 큽니다. `Limit`으로 100건씩 나누어 처리하고, `ORDER BY id ASC`로 등록 순서를 보장했습니다.
+
+**재시도 한계** — 브로커 장애가 장기화되면 무의미한 재시도가 반복됩니다. `retryCount`가 임계치를 넘으면 `FAILED`로 전이시켜 운영자 개입이 필요한 상태를 구분했습니다.
+
+**발행 완료 이벤트 정리** — outbox 테이블이 무한히 증가하지 않도록, 매일 새벽 3시에 7일 경과한 `PUBLISHED` 레코드를 삭제하는 스케줄러를 추가했습니다.
+
+</details>
+
+<br/>
+
+### 검증 — Kafka 장애 복구 시나리오
+
+Outbox의 실효성을 확인하기 위해 브로커를 의도적으로 중단한 상태에서 주문을 생성했습니다.
+
+**① Kafka 중단 후 주문 생성**
+
+```bash
+docker stop shopflow-kafka
+```
+
+브로커가 다운된 상태에서도 주문 API는 정상적으로 `201`을 반환했습니다.
+
+![Kafka 중단 후 주문 생성](./docs/images/outbox-kafka-down.png)
+
+**② outbox 상태 확인**
+
+이벤트가 `PENDING` 상태로 DB에 보존되며 재시도가 누적되고 있었습니다.
+
+![PENDING 상태로 보존](./docs/images/outbox-pending.png)
+
+```
+| id | status  | retry_count |
+|  3 | PENDING |           2 |
+```
+
+**③ Kafka 복구**
+
+```bash
+docker start shopflow-kafka
+```
+
+별도 조치 없이 다음 스케줄러 실행 주기에 자동으로 발행되었습니다.
+
+![복구 후 자동 발행](./docs/images/outbox-recovered.png)
+
+```
+| id | status    | retry_count |
+|  3 | PUBLISHED |           3 |
+```
+
+<br/>
+
+### 결론
+
+| | 직접 발행 | `@TransactionalEventListener` | Outbox 패턴 |
+|---|---|---|---|
+| 커밋 전 발행 방지 | ❌ | 🅾️ | 🅾️ |
+| 롤백 시 이벤트 차단 | ❌ | 🅾️ | 🅾️ |
+| 발행 실패 시 복구 | ❌ | ❌ | 🅾️ |
+| 추가 비용 | — | 없음 | 테이블 + 스케줄러 |
+
+`@TransactionalEventListener`는 추가 비용 없이 순서 문제를 해결하므로, **브로커 가용성이 충분히 높고 이벤트 유실을 감수할 수 있는 경우**에는 합리적인 선택입니다.
+
+이 프로젝트는 재고 차감이라는 **유실 시 데이터 정합성이 깨지는 작업**을 이벤트로 처리하므로, 테이블과 스케줄러라는 추가 비용을 감수하고 Outbox 패턴을 채택했습니다.
+
+> **트레이드오프**: Outbox는 스케줄러 주기만큼의 발행 지연(최대 1초)이 발생합니다. 실시간성이 더 중요한 도메인이라면 Debezium 등을 이용한 CDC 방식으로 binlog를 직접 구독해 지연과 폴링 부하를 모두 제거할 수 있습니다.
+
+<br/>
+
+### 과정에서 마주친 문제 — 이중 직렬화
+
+Outbox 도입 과정에서 Consumer가 메시지를 역직렬화하지 못하는 문제가 발생했습니다.
+
+```
+Cannot construct instance of `OrderCreatedEvent` from String value
+```
+
+Kafka에 적재된 메시지를 확인한 결과, JSON 문자열이 한 번 더 감싸져 있었습니다.
+
+```
+"{\"orderId\":10,\"orderNumber\":\"ORD-97EFBEA3\",...}"
+↑ 바깥 따옴표 + 내부 이스케이프
+```
+
+Outbox는 payload를 이미 JSON 문자열로 직렬화해 저장하는데, Producer 설정이 `JsonSerializer`로 남아 있어 **문자열 전체를 다시 JSON으로 변환**한 것이 원인이었습니다.
+
+```yaml
+# 직렬화를 애플리케이션이 담당하므로 Kafka는 문자열을 그대로 전달
+producer:
+  value-serializer: org.apache.kafka.common.serialization.StringSerializer
+consumer:
+  value-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+```
+
+직렬화 책임이 애플리케이션과 Kafka 클라이언트 양쪽에 중복되어 있던 것이 문제였고, **어느 계층이 직렬화를 담당할지 명확히 정하는 것**이 중요하다는 점을 확인했습니다.
+
+또한 설정 변경 이전에 발행된 메시지는 형식이 달라 계속 실패했습니다. Consumer가 동일 메시지를 반복 재시도하다 한계에 도달해 스킵하는 동작을 확인했으며, 이런 처리 불가 메시지를 별도로 격리하는 DLQ(Dead Letter Queue) 구성이 필요하다는 점을 인지했습니다.
