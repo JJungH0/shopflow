@@ -1,5 +1,6 @@
 package com.shopflow.order.service;
 
+import com.shopflow.common.event.KafkaTopic;
 import com.shopflow.common.event.OrderCreatedEvent;
 import com.shopflow.common.exception.BusinessException;
 import com.shopflow.common.exception.ErrorCode;
@@ -8,12 +9,17 @@ import com.shopflow.order.domain.Order;
 import com.shopflow.order.domain.OrderItem;
 import com.shopflow.order.dto.OrderCreateRequest;
 import com.shopflow.order.dto.OrderResponse;
+import com.shopflow.order.event.OrderCreatedInternalEvent;
 import com.shopflow.order.event.OrderEventProducer;
+import com.shopflow.order.outbox.OutboxEvent;
+import com.shopflow.order.outbox.OutboxEventRepository;
 import com.shopflow.order.repository.OrderRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import tools.jackson.databind.ObjectMapper;
 
 import java.util.List;
 
@@ -24,7 +30,10 @@ public class OrderService {
 
     private final OrderRepository orderRepository;
     private final ProductClient productClient;
-    private final OrderEventProducer orderEventProducer;
+    //    private final OrderEventProducer orderEventProducer;
+//    private final ApplicationEventPublisher eventPublisher;
+    private final OutboxEventRepository outboxEventRepository;
+    private final ObjectMapper objectMapper;
 
     @Transactional
     public OrderResponse createOrder(OrderCreateRequest request, Long userId) {
@@ -44,11 +53,28 @@ public class OrderService {
 
         Order saved = orderRepository.save(Order.create(userId, orderItems));
 
-        orderEventProducer.publishOrderCreated(toEvent(saved));
+        saveOutboxEvent(saved);
+
+//        eventPublisher.publishEvent(new OrderCreatedInternalEvent(toEvent(saved)));
+
+//        orderEventProducer.publishOrderCreated(toEvent(saved));
 
         log.info("주문 생성: orderNumber={}, userId={}", saved.getOrderNumber(), saved.getUserId());
 
         return OrderResponse.from(saved);
+    }
+
+    private void saveOutboxEvent(Order order) {
+        OrderCreatedEvent payload = toEvent(order);
+
+        OutboxEvent outboxEvent = OutboxEvent.create(
+                "Order",
+                String.valueOf(order.getId()),
+                KafkaTopic.ORDER_CREATED,
+                objectMapper.writeValueAsString(payload)
+        );
+
+        outboxEventRepository.save(outboxEvent);
     }
 
     private OrderCreatedEvent toEvent(Order order) {
