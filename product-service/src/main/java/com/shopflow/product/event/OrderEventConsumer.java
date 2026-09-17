@@ -10,29 +10,52 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.stereotype.Component;
+import tools.jackson.databind.ObjectMapper;
 
 @Slf4j @Component
 @RequiredArgsConstructor
 public class OrderEventConsumer {
 
     private final RedissonLockStockService stockService;
-    private final KafkaTemplate<String, Object> kafkaTemplate;
+    private final KafkaTemplate<String, String> kafkaTemplate;
+    private final ObjectMapper objectMapper;
+
+//    @KafkaListener(
+//            topics = KafkaTopic.ORDER_CREATED,
+//            groupId = "product-service"
+//    )
+//    public void handleOrderCreated(OrderCreatedEvent event) {
+//        log.info("주문 생성 이벤트 수신: orderNumber={}", event.orderNumber());
+//
+//        try {
+//            event.items().forEach(
+//                    item -> stockService.decreaseStock(item.productId(), item.quantity())
+//            );
+//
+//            publishStockDecreased(event);
+//        } catch (Exception e) {
+//            log.error("재고 차감 실패: orderNumber={}, reason={}", event.orderNumber(), e.getMessage());
+//
+//            publishStockFailed(event, e.getMessage());
+//        }
+//    }
 
     @KafkaListener(
             topics = KafkaTopic.ORDER_CREATED,
-            groupId = "product-service"
-    )
-    public void handleOrderCreated(OrderCreatedEvent event) {
+            groupId = "product-service")
+    public void handleOrderCreated(String message) {
+        OrderCreatedEvent event = objectMapper.readValue(message, OrderCreatedEvent.class);
+
         log.info("주문 생성 이벤트 수신: orderNumber={}", event.orderNumber());
 
         try {
-            event.items().forEach(
-                    item -> stockService.decreaseStock(item.productId(), item.quantity())
-            );
+            event.items().forEach(item ->
+                    stockService.decreaseStock(item.productId(), item.quantity()));
 
             publishStockDecreased(event);
         } catch (Exception e) {
-            log.error("재고 차감 실패: orderNumber={}, reason={}", event.orderNumber(), e.getMessage());
+            log.error("재고 차감 실패: orderNumber={}, reason={}",
+                    event.orderNumber(), e.getMessage());
 
             publishStockFailed(event, e.getMessage());
         }
@@ -47,7 +70,7 @@ public class OrderEventConsumer {
         kafkaTemplate.send(
                 KafkaTopic.STOCK_DECREASED,
                 String.valueOf(event.orderId()),
-                result
+                objectMapper.writeValueAsString(result)
         );
 
         log.info("재고 차감 완료: orderNumber={}", event.orderNumber());
@@ -68,7 +91,7 @@ public class OrderEventConsumer {
         kafkaTemplate.send(
                 KafkaTopic.STOCK_FAILED,
                 String.valueOf(event.orderId()),
-                result
+                objectMapper.writeValueAsString(result)
         );
     }
 }
